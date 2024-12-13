@@ -635,8 +635,11 @@ async function receiveStream(stream: any): Promise<any> {
         if (!message || ![2001, 2008].includes(message.content_type))
           return;
         const content = JSON.parse(message.content);
-        if (content.text)
-          data.choices[0].message.content += content.text;
+        if (content.text) {
+          const text = content.text;
+          const exceptCharIndex = text.indexOf("�");
+          data.choices[0].message.content += text.substring(0, exceptCharIndex == -1 ? text.length : exceptCharIndex);
+        }
       } catch (err) {
         logger.error(err);
         reject(err);
@@ -658,7 +661,6 @@ async function receiveStream(stream: any): Promise<any> {
  * @param endCallback 传输结束回调
  */
 function createTransStream(stream: any, endCallback?: Function) {
-  let isEnd = false;
   let convId = "";
   // 消息创建时间
   const created = util.unixTimestamp();
@@ -691,7 +693,6 @@ function createTransStream(stream: any, endCallback?: Function) {
       if (rawResult.code)
         throw new APIException(EX.API_REQUEST_FAILED, `[请求doubao失败]: ${rawResult.code}-${rawResult.message}`);
       if (rawResult.event_type == 2003) {
-        isEnd = true;
         transStream.write(`data: ${JSON.stringify({
           id: convId,
           model: MODEL_NAME,
@@ -717,7 +718,6 @@ function createTransStream(stream: any, endCallback?: Function) {
       if (!convId)
         convId = result.conversation_id;
       if (result.is_finish) {
-        isEnd = true;
         transStream.write(`data: ${JSON.stringify({
           id: convId,
           model: MODEL_NAME,
@@ -739,19 +739,24 @@ function createTransStream(stream: any, endCallback?: Function) {
       if (!message || ![2001, 2008].includes(message.content_type))
         return;
       const content = JSON.parse(message.content);
-      transStream.write(`data: ${JSON.stringify({
-        id: convId,
-        model: MODEL_NAME,
-        object: "chat.completion.chunk",
-        choices: [
-          {
-            index: 0,
-            delta: { role: "assistant", content: content.text },
-            finish_reason: null,
-          },
-        ],
-        created,
-      })}\n\n`);
+      if (content.text) {
+        const text = content.text;
+        const exceptCharIndex = text.indexOf("�");
+        const chunk = text.substring(0, exceptCharIndex == -1 ? text.length : exceptCharIndex);
+        transStream.write(`data: ${JSON.stringify({
+          id: convId,
+          model: MODEL_NAME,
+          object: "chat.completion.chunk",
+          choices: [
+            {
+              index: 0,
+              delta: { role: "assistant", content: chunk },
+              finish_reason: null,
+            },
+          ],
+          created,
+        })}\n\n`);
+      }
     } catch (err) {
       logger.error(err);
       !transStream.closed && transStream.end("\n\n");
